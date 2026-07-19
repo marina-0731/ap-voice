@@ -1,0 +1,15 @@
+# Render Blueprint: リポジトリ直下に置くと「New +」→「Blueprint」で一発設定できる
+services:
+  - type: web
+    name: ap-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --omit=dev
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false          # ダッシュボードで手動設定(STT接続時)
+      - key: ALLOWED_ORIGIN
+        value: "*"           # アプリ配布後もExpoアプリからの接続は "*" でOK
