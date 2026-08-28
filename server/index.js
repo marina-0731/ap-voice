@@ -19,11 +19,60 @@ const AUDIO_DIR = path.join(__dirname, 'audio');
 if (!existsSync(AUDIO_DIR)) mkdirSync(AUDIO_DIR);
 
 const app = express();
+app.use(express.json({ limit: '256kb' }));
 app.use('/audio', express.static(AUDIO_DIR));
 
 // ヘルスチェック(Renderのスリープ解除・死活監視用)
 app.get('/health', (_req, res) => {
   res.json({ ok: true, rooms: rooms.size, uptime: process.uptime() });
+});
+
+/**
+ * 通報の受け口(App Store ガイドライン 1.2 対応)。
+ * 記録はサーバーログに残す(Renderのログから追える)。
+ * REPORT_WEBHOOK_URL を設定すると、その宛先にも転送する。
+ * 運営は24時間以内に内容を確認する(利用規約に明記)。
+ */
+const REPORT_LIMIT_PER_MIN = 10;
+const reportHits = new Map(); // ip -> { count, windowStart }
+
+app.post('/report', (req, res) => {
+  // 通報自体が荒らしに使われないよう、IPごとに軽く絞る
+  const ip = req.ip ?? 'unknown';
+  const now = Date.now();
+  const hit = reportHits.get(ip);
+  if (!hit || now - hit.windowStart > 60_000) {
+    reportHits.set(ip, { count: 1, windowStart: now });
+  } else if (++hit.count > REPORT_LIMIT_PER_MIN) {
+    return res.status(429).json({ ok: false, error: '通報が多すぎます。少し待ってからお試しください。' });
+  }
+
+  const { roomId, entryId, reporterUserId, reportedUserId, reason } = req.body ?? {};
+  if (!entryId || !reportedUserId) {
+    return res.status(400).json({ ok: false, error: 'entryId と reportedUserId は必須です' });
+  }
+
+  // 通報対象の文字起こしを添えて記録する(音声本体は1時間で消えるため)
+  const entry = rooms.get(roomId)?.queue.find((e) => e.id === entryId);
+  const record = {
+    type: 'ap_report',
+    at: new Date().toISOString(),
+    roomId, entryId, reporterUserId, reportedUserId,
+    reason: String(reason ?? '').slice(0, 500),
+    transcript: entry?.transcript ?? null,
+    audioUrl: entry?.audioUrl ?? null,
+  };
+  console.warn('[REPORT]', JSON.stringify(record));
+
+  if (process.env.REPORT_WEBHOOK_URL) {
+    fetch(process.env.REPORT_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    }).catch((e) => console.error('通報の転送に失敗:', e.message));
+  }
+
+  res.json({ ok: true });
 });
 
 const httpServer = createServer(app);
@@ -154,7 +203,7 @@ io.on('connection', (socket) => {
   });
 
   /** 発話終了: 音声を保存し、相槌判定してから再生キューへ */
-  socket.on('speech_end', async ({ roomId, userId, entryId, audioBase64, durationMs }) => {
+  socket.on('speech_end', ({ roomId, userId, entryId, audioBase64, durationMs }) => {
     const room = rooms.get(roomId);
     if (!room) return;
     const entry = room.queue.find((e) => e.id === entryId);
@@ -165,17 +214,21 @@ io.on('connection', (socket) => {
     entry.audioUrl = `/audio/${filename}`;
     entry.durationMs = durationMs;
     entry.isBackchannel = durationMs < BACKCHANNEL_MS;
-    entry.status = 'ready';
+    // 相槌はキューに並ばせず即完了(文字としてだけ残る)
+    entry.status = entry.isBackchannel ? 'done' : 'ready';
+    entry.transcribing = true;
 
-    // 文字起こし(MVPはスタブ。本番はSTT APIをここに接続)
-    entry.transcript = await transcribe(audioBase64, durationMs);
-
-    if (entry.isBackchannel) {
-      // 相槌はキューに並ばせず即完了(文字としてだけ残る)
-      entry.status = 'done';
-    }
+    // 先に順番を進める。文字起こしの往復(1〜3秒)で再生を待たせない。
     broadcast(roomId);
     tryPlayNext(roomId);
+
+    // 文字起こしは後追いで届く。順序はすでに speech_start で確定しているので、
+    // ここが遅れても・失敗しても再生順には一切影響しない。
+    transcribe(audioBase64).then((text) => {
+      entry.transcript = text;
+      entry.transcribing = false;
+      broadcast(roomId);
+    });
   });
 
   /** 全員の再生完了が揃ったら次へ */
@@ -211,11 +264,38 @@ function finishEntry(room, entry) {
 }
 
 /**
- * STTスタブ。本番では Google Speech-to-Text / Whisper API に差し替える。
- * 差し替えポイントはこの関数だけに閉じてある。
+ * 文字起こし(OpenAI Whisper)。日本語固定。
+ *
+ * ここは「落ちてもよい」経路として設計してある:
+ * - APIキーが無くてもサーバーは起動し、音声通話はそのまま動く
+ * - API失敗・タイムアウトでも例外を投げず、説明文を返してキューを止めない
+ * 音声は .m4a で届く。
  */
-async function transcribe(_audioBase64, durationMs) {
-  return `(音声メッセージ ${Math.round(durationMs / 1000)}秒)`;
+const STT_TIMEOUT_MS = 20_000;
+
+async function transcribe(audioBase64) {
+  if (!process.env.OPENAI_API_KEY) return '(文字起こしは現在利用できません)';
+  try {
+    const buffer = Buffer.from(audioBase64, 'base64');
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: 'audio/m4a' }), 'audio.m4a');
+    form.append('model', 'whisper-1');
+    form.append('language', 'ja');
+
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: form,
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+
+    const data = await res.json();
+    return data.text?.trim() || '(聞き取れませんでした)';
+  } catch (e) {
+    console.error('STT failed:', e.message);
+    return '(文字起こしに失敗しました)';
+  }
 }
 
 const PORT = process.env.PORT ?? 3001;

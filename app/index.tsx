@@ -59,6 +59,25 @@ export default function Home() {
           <Text style={styles.joinLabel}>ルームに入る</Text>
         </Pressable>
       </View>
+
+      <View style={styles.links}>
+        <Pressable
+          onPress={() => router.push('/blocked')}
+          style={styles.link}
+          accessibilityRole="button"
+          accessibilityLabel="ブロックした人を見る"
+        >
+          <Text style={styles.linkLabel}>ブロックした人</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/terms')}
+          style={styles.link}
+          accessibilityRole="button"
+          accessibilityLabel="利用規約と個人情報のあつかいを読む"
+        >
+          <Text style={styles.linkLabel}>規約とプライバシー</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -75,16 +94,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 17,
     paddingHorizontal: 16,
-    height: touch.min,
+    // 文字サイズを大きくしたときに文字が切れないよう、固定の高さにしない
+    minHeight: touch.min,
+    paddingVertical: 12,
   },
   joinButton: {
     marginTop: 20,
-    height: touch.min + 8,
+    minHeight: touch.min + 8,
+    paddingVertical: 12,
     borderRadius: radius.lg,
     backgroundColor: colors.speaking,
     alignItems: 'center',
     justifyContent: 'center',
   },
   joinPressed: { backgroundColor: colors.speakingDeep },
-  joinLabel: { ...type.title, color: colors.bg, fontWeight: '700' },
+  joinLabel: { ...type.title, color: colors.bg, fontWeight: '700', textAlign: 'center' },
+  links: { marginTop: 'auto', gap: 4, paddingBottom: 8 },
+  link: { minHeight: touch.min - 12, justifyContent: 'center' },
+  linkLabel: { ...type.body, color: colors.focus },
 });

@@ -27,6 +27,7 @@ export type QueueEntry = {
   status: 'recording' | 'ready' | 'playing' | 'done';
   audioUrl?: string;
   transcript?: string;
+  transcribing?: boolean;   // 文字起こし待ち(再生はもう始まっている)
   isBackchannel?: boolean;  // 相槌判定(キューをスキップ)
   durationMs?: number;
 };

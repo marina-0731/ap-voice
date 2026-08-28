@@ -32,15 +32,21 @@ git push -u origin main
 ブラウザで `https://ap-server-xxxx.onrender.com/health` を開いて
 `{"ok":true,...}` が出ればデプロイ成功。
 
+### Root Directory について
+
+`render.yaml` の `rootDir: server` は、**`server/` がリポジトリ直下にある**ことを前提にしています。
+以前 `ap-app/server` になっていた構成は解消済みなので、Renderダッシュボード側の
+Root Directory も `server` に戻してください(`ap-app/server` のままだと失敗します)。
+
 ## ステップ3: アプリをサーバーに向ける
 
-`app.json` の1行を書き換え:
+`app.json` は本番URLを指すよう設定済みです:
 
 ```json
-"extra": { "serverUrl": "https://ap-server-xxxx.onrender.com" }
+"extra": { "serverUrl": "https://ap-server-896x.onrender.com" }
 ```
 
-その後 `npx expo start` で起動し、2台の端末で同じルームコードに入って通話テスト。
+`npx expo start` で起動し、2台の端末で同じルームコードに入って通話テスト。
 
 ## 無料枠の注意点(検証フェーズでは許容)
 
@@ -52,13 +58,25 @@ git push -u origin main
 
 ## STT(文字起こし)を有効にする場合
 
+`transcribe()` はWhisper実装済みなので、やることはキーの設定だけです。
+
 1. OpenAIのAPIキーを取得(https://platform.openai.com)
 2. Renderダッシュボード → ap-server → Environment → `OPENAI_API_KEY` を設定
-3. `server/index.js` の `transcribe()` をREADME記載のWhisper実装に差し替えてpush
-   (pushすると自動で再デプロイされる)
+3. 保存すると自動で再デプロイされる
+
+**キーを設定しなくてもサーバーは起動し、通話はそのまま動きます。**
+その場合、文字起こしの欄が `(文字起こしは現在利用できません)` になります。
 
 ※ Whisper APIは従量課金(約 $0.006/分)。検証段階なら月数百円以内に収まる見込み。
    APIキーは絶対にコードに直接書かず、必ずRenderの環境変数で設定すること。
+
+## 通報の受け取り方(任意)
+
+通報はサーバーのログに `[REPORT]` から始まる行として残ります
+(Renderダッシュボード → ap-server → Logs で検索)。
+
+メールやSlackへ流したい場合は、環境変数 `REPORT_WEBHOOK_URL` に受け口のURLを設定すると、
+通報の内容がJSONでPOSTされます(Zapier / Make / Slack Incoming Webhook など)。
 
 ## つまずいたら
 
