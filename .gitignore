@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+dist/
+web-build/
+
+# 音声は1時間で自動削除される一時ファイル。絶対にコミットしない
+server/audio/
+
+# 秘密情報は必ず環境変数から。コミットに含めない
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store

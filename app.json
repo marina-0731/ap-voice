@@ -19,6 +19,6 @@
       "permissions": ["RECORD_AUDIO"]
     },
     "plugins": ["expo-router", ["expo-av", { "microphonePermission": "声でメッセージを送るためにマイクを使用します。" }]],
-    "extra": { "serverUrl": "http://localhost:3001" }
+    "extra": { "serverUrl": "https://ap-server-896x.onrender.com" }
   }
 }
